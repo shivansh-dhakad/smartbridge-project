@@ -1,10 +1,14 @@
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from core.data_fusion import DataFusionEngine
+from core.engagement_scorer import EngagementScorer
+
+app = FastAPI(title="Classroom Engagement System")
 
 fusion_engine = DataFusionEngine(window_seconds=2.0)
+engagement_scorer = EngagementScorer()
 
 
 class VisionEvent(BaseModel):
@@ -19,16 +23,53 @@ class AudioEvent(BaseModel):
     metrics: dict = Field(default_factory=dict)
 
 
+class EngagementScoreRequest(BaseModel):
+    fused_session: dict
+    expected_participants: int | None = Field(
+        default=None, ge=1
+    )
+
+
+@app.get("/")
+def root():
+    return {
+        "message": "Classroom Engagement System API",
+        "endpoints": [
+            "/api/fusion/vision",
+            "/api/fusion/audio",
+            "/api/fusion/session",
+            "/api/fusion/reset",
+            "/api/engagement/score",
+        ],
+    }
+
+
 @app.post("/api/fusion/vision")
 def add_vision_event(event: VisionEvent):
-    fusion_engine.add_vision_event(event.model_dump())
-    return {"status": "accepted", "modality": "vision"}
+    try:
+        fusion_engine.add_vision_event(event.model_dump())
+        return {
+            "status": "accepted",
+            "modality": "vision",
+        }
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(
+            status_code=400, detail=str(exc)
+        ) from exc
 
 
 @app.post("/api/fusion/audio")
 def add_audio_event(event: AudioEvent):
-    fusion_engine.add_audio_event(event.model_dump())
-    return {"status": "accepted", "modality": "audio"}
+    try:
+        fusion_engine.add_audio_event(event.model_dump())
+        return {
+            "status": "accepted",
+            "modality": "audio",
+        }
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(
+            status_code=400, detail=str(exc)
+        ) from exc
 
 
 @app.get("/api/fusion/session")
@@ -40,4 +81,24 @@ def get_fused_session():
 def reset_fusion_session():
     global fusion_engine
     fusion_engine = DataFusionEngine(window_seconds=2.0)
+
     return {"status": "reset"}
+
+
+@app.post("/api/engagement/score")
+def calculate_engagement(request: EngagementScoreRequest):
+    try:
+        result = engagement_scorer.score_session(
+            request.fused_session,
+            expected_participants=request.expected_participants,
+        )
+
+        return {
+            "status": "success",
+            "engagement": result,
+        }
+
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(
+            status_code=400, detail=str(exc)
+        ) from exc
