@@ -2,39 +2,42 @@
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from core.multimodal_agent import MultimodalAgent
-from core.llm_insights import InsightGenerator
+from core.data_fusion import DataFusionEngine
+
+fusion_engine = DataFusionEngine(window_seconds=2.0)
 
 
-multimodal_agent = MultimodalAgent()
-insight_generator = InsightGenerator()
+class VisionEvent(BaseModel):
+    elapsed_seconds: float = Field(ge=0)
+    timestamp: str | None = None
+    participants: list[dict] = Field(default_factory=list)
 
 
-class SessionAnalysisRequest(BaseModel):
-    vision_data: dict = Field(default_factory=dict)
-    audio_data: dict = Field(default_factory=dict)
+class AudioEvent(BaseModel):
+    elapsed_seconds: float = Field(ge=0)
+    timestamp: str | None = None
+    metrics: dict = Field(default_factory=dict)
 
 
-@app.post("/api/insights")
-def generate_insights(request: SessionAnalysisRequest):
-    try:
-        analysis = multimodal_agent.analyze_session(
-            vision_data=request.vision_data,
-            audio_data=request.audio_data
-        )
+@app.post("/api/fusion/vision")
+def add_vision_event(event: VisionEvent):
+    fusion_engine.add_vision_event(event.model_dump())
+    return {"status": "accepted", "modality": "vision"}
 
-        insight = insight_generator.generate_classroom_insight(
-            analysis
-        )
 
-        return {
-            "status": "success",
-            "analysis": analysis,
-            "insight": insight
-        }
+@app.post("/api/fusion/audio")
+def add_audio_event(event: AudioEvent):
+    fusion_engine.add_audio_event(event.model_dump())
+    return {"status": "accepted", "modality": "audio"}
 
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc)
-        ) from exc
+
+@app.get("/api/fusion/session")
+def get_fused_session():
+    return fusion_engine.get_session_summary()
+
+
+@app.post("/api/fusion/reset")
+def reset_fusion_session():
+    global fusion_engine
+    fusion_engine = DataFusionEngine(window_seconds=2.0)
+    return {"status": "reset"}
